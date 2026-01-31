@@ -9,7 +9,6 @@ use std::{
 };
 
 use async_trait::async_trait;
-use base64::Engine;
 use futures::{
     sink::SinkExt,
     stream::{BoxStream, SplitSink, StreamExt},
@@ -33,7 +32,7 @@ use nimiq_jsonrpc_core::{
     Request, RequestOrResponse, Response, SubscriptionId, SubscriptionMessage,
 };
 
-use crate::{Client, Credentials};
+use crate::{Client};
 
 /// Error type returned by websocket client.
 #[derive(Debug, Error)]
@@ -81,19 +80,15 @@ impl WebsocketClient {
     /// # Arguments
     ///
     ///  - `url`: The URL of the websocket endpoint (.e.g `ws://localhost:8000/ws`)
-    ///  - `basic_auth`: Credentials for HTTP basic auth.
+    ///  - `token`: Bearer token for HTTP authorization.
     ///
     pub async fn new(url: Url, token: Option<String>) -> Result<Self, Error> {
         let request = {
             let uri: http::Uri = url.to_string().parse().unwrap();
             let mut request = uri.into_client_request()?;
 
-            if let Some(basic_auth) = basic_auth {
-                let header_value = format!(
-                    "Basic {}",
-                    base64::prelude::BASE64_STANDARD
-                        .encode(format!("{}:{}", basic_auth.username, basic_auth.password.0))
-                );
+            if let Some(bearer_token) = token {
+                let header_value = format!("Bearer {}", bearer_token);
                 request.headers_mut().append(
                     "Authorization",
                     header_value
@@ -171,20 +166,32 @@ impl WebsocketClient {
                 if request.id.is_some() {
                     log::error!("Received unexpected request, which is not a notification.");
                 } else if let Some(params) = request.params {
-                    let message: SubscriptionMessage<Value> = serde_json::from_value(params)
-                        .expect("Failed to deserialize request parameters");
+                    let params_clone = params.clone();
+                    let message_result: Result<SubscriptionMessage<Value>, _> =
+                        serde_json::from_value(params);
 
-                    let mut streams = streams.write().await;
-                    if let Some(tx) = streams.get_mut(&message.subscription) {
-                        tx.send(message).await?;
-                    } else {
-                        log::error!(
-                            "Notification for unknown stream ID: {}",
-                            message.subscription
-                        );
+                    match message_result {
+                        Ok(message) => {
+                            let mut streams = streams.write().await;
+                            if let Some(tx) = streams.get_mut(&message.subscription) {
+                                tx.send(message).await?;
+                            } else {
+                                log::error!(
+                                    "Notification for unknown stream ID: {}",
+                                    message.subscription
+                                );
+                            }
+                        }
+                        Err(e) => {
+                            log::error!(
+                                "Failed to deserialize request parameters: {}. Params: {:?}",
+                                e,
+                                params_clone
+                            );
+                        }
                     }
                 } else {
-                    log::error!("No 'params' field in notification.");
+                    log::debug!("No 'params' field in notification.");
                 }
             }
             RequestOrResponse::Response(response) => {
