@@ -221,7 +221,7 @@ impl Client for WebsocketClient {
         self.sender
             .write()
             .await
-            .send(Message::binary(serde_json::to_vec(&request)?))
+            .send(Message::text(serde_json::to_string(&request)?))
             .await?;
 
         let (tx, rx) = oneshot::channel();
