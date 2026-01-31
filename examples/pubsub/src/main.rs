@@ -1,83 +1,47 @@
-use std::env;
-
-use async_stream::stream;
-use async_trait::async_trait;
-use futures::stream::{BoxStream, StreamExt};
-use tokio::time::Duration;
-
-use nimiq_jsonrpc_client::{websocket::WebsocketClient, Client};
-use nimiq_jsonrpc_server::{Config, Server};
-
-#[nimiq_jsonrpc_derive::proxy(name = "HelloWorldProxy")]
-#[async_trait]
-trait HelloWorld {
-    type Error;
-
-    #[stream]
-    async fn hello_subscribe(&self) -> Result<BoxStream<'static, String>, Self::Error>;
-}
-
-struct HelloWorldService;
-
-#[nimiq_jsonrpc_derive::service]
-#[async_trait]
-impl HelloWorld for HelloWorldService {
-    type Error = ();
-
-    #[stream]
-    async fn hello_subscribe(&self) -> Result<BoxStream<'static, String>, Self::Error> {
-        log::info!("Client subscribed");
-
-        let mut interval = tokio::time::interval(Duration::from_secs(1));
-
-        let stream = stream! {
-            loop {
-                let instant = interval.tick().await;
-                yield format!("Hello, World: {:?}", instant);
-            }
-        };
-
-        Ok(stream.boxed())
-    }
-}
+use futures::StreamExt;
+use nimiq_jsonrpc_client::websocket::WebsocketClient;
+use nimiq_jsonrpc_client::Client; // Import the Client trait
+use serde_json::Value;
 
 #[tokio::main]
 async fn main() {
-    dotenvy::dotenv().ok();
-    if env::var("RUST_LOG").is_err() {
-        env::set_var(
-            "RUST_LOG",
-            "info,nimiq_jsonrpc_core=debug,nimiq_jsonrpc_server=debug,nimiq_jsonrpc_client=debug",
-        );
-    }
-
     pretty_env_logger::init();
+    log::info!("Connecting to websocket");
 
-    let config = Config::default();
-    log::info!("Listening on: {}", config.bind_to);
+    let url = "ws://localhost:25558".parse().unwrap();
+    let token = Some("lHI9Qhtb5XQ18XWvbO41GePxaHB0PbRdtI5wBzYH".to_string());
 
-    let server = Server::new(config, HelloWorldService);
-    tokio::spawn(async move {
-        server.run().await;
-    });
+    let client = match WebsocketClient::new(url, token).await {
+        Ok(client) => client,
+        Err(e) => {
+            eprintln!("Failed to connect websocket: {:?}", e);
+            return;
+        }
+    };
 
-    let url = "ws://localhost:8000/ws".parse().unwrap();
-    let client = WebsocketClient::with_url(url).await.unwrap();
-    let proxy = HelloWorldProxy::new(client);
+    let status: Value = client
+        .send_request::<(), Value>("minecraft:server/status", None)
+        .await
+        .expect("Failed to send subscription request");
 
-    let mut stream = proxy.hello_subscribe().await.unwrap();
+    log::info!("Received status response: {}", serde_json::to_string(&status).unwrap());
+}
 
-    // Run the test for 5 seconds before closing the stream'
-    tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_secs(5)).await;
+#[derive(serde::Deserialize, Debug)]
+struct ServerManagementVersion {
+    protocol: i32,
+    name: String,
+}
 
-        println!("Close stream");
-        if let Err(e) = proxy.client.disconnect_stream(1.into()).await {
-            panic!("Error while disconnecting stream: {}", e)
-        };
-    });
+#[derive(serde::Deserialize, Debug)]
+struct ServerManagementPlayer {
+    name: String,
+    id: String,
+}
 
-    while let Some(item) = stream.next().await {
-        println!("Received item from stream: {}", item);
-    }
+#[derive(serde::Deserialize, Debug)]
+struct ServerManagementStateResponse {
+    players: Vec<ServerManagementPlayer>,
+    started: bool,
+    version: ServerManagementVersion,
 }
