@@ -80,7 +80,7 @@ pub trait Client {
     /// Returns either the result that was responded with by the server, or an error. The error can be either a
     /// client-side error (e.g. a network error), or an error object sent by the server.
     ///
-    async fn send_request<P, R>(&self, method: &str, params: &P) -> Result<R, Self::Error>
+    async fn send_request<P, R>(&self, method: &str, params: Option<&P>) -> Result<R, Self::Error>
     where
         P: Serialize + Debug + Send + Sync,
         R: for<'de> Deserialize<'de> + Debug + Send + Sync;
@@ -134,7 +134,7 @@ pub struct ArcClient<C> {
 impl<C: Client + Send> Client for ArcClient<C> {
     type Error = <C as Client>::Error;
 
-    async fn send_request<P, R>(&self, method: &str, params: &P) -> Result<R, Self::Error>
+    async fn send_request<P, R>(&self, method: &str, params: Option<&P>) -> Result<R, Self::Error>
     where
         P: Serialize + Debug + Send + Sync,
         R: for<'de> Deserialize<'de> + Debug + Send + Sync,

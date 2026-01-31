@@ -77,14 +77,14 @@ impl HttpClient {
 impl Client for HttpClient {
     type Error = Error;
 
-    async fn send_request<P, R>(&self, method: &str, params: &P) -> Result<R, Error>
+    async fn send_request<P, R>(&self, method: &str, params: Option<&P>) -> Result<R, Error>
     where
         P: Serialize + Debug + Send + Sync,
         R: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
 
-        let request = Request::build(method.to_owned(), Some(params), Some(&request_id))
+        let request = Request::build(method.to_owned(), params, Some(&request_id))
             .expect("Failed to serialize JSON-RPC request.");
 
         log::debug!("Sending request: {:?}", request);

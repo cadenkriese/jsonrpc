@@ -83,7 +83,7 @@ impl WebsocketClient {
     ///  - `url`: The URL of the websocket endpoint (.e.g `ws://localhost:8000/ws`)
     ///  - `basic_auth`: Credentials for HTTP basic auth.
     ///
-    pub async fn new(url: Url, basic_auth: Option<Credentials>) -> Result<Self, Error> {
+    pub async fn new(url: Url, token: Option<String>) -> Result<Self, Error> {
         let request = {
             let uri: http::Uri = url.to_string().parse().unwrap();
             let mut request = uri.into_client_request()?;
@@ -207,24 +207,24 @@ impl WebsocketClient {
 impl Client for WebsocketClient {
     type Error = Error;
 
-    async fn send_request<P, R>(&self, method: &str, params: &P) -> Result<R, Self::Error>
+    async fn send_request<P, R>(&self, method: &str, params: Option<&P>) -> Result<R, Self::Error>
     where
         P: Serialize + Debug + Send + Sync,
         R: for<'de> Deserialize<'de> + Debug + Send + Sync,
     {
         let request_id = self.next_id.fetch_add(1, Ordering::SeqCst);
-        let request = Request::build(method.to_owned(), Some(params), Some(&request_id))
+        let request = Request::build(method.to_owned(), params, Some(&request_id))
             .expect("Failed to serialize JSON-RPC request.");
 
-        log::debug!("Sending request: {:?}", request);
+        log::debug!("Sending request: {}", serde_json::to_string(&request).unwrap());
+
+        let (tx, rx) = oneshot::channel();
 
         self.sender
             .write()
             .await
             .send(Message::text(serde_json::to_string(&request)?))
             .await?;
-
-        let (tx, rx) = oneshot::channel();
 
         let mut requests = self.requests.write().await;
         requests.insert(request_id, tx);
