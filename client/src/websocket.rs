@@ -32,7 +32,7 @@ use nimiq_jsonrpc_core::{
     Request, RequestOrResponse, Response, SubscriptionId, SubscriptionMessage,
 };
 
-use crate::{Client};
+use crate::Client;
 
 /// Error type returned by websocket client.
 #[derive(Debug, Error)]
@@ -154,8 +154,15 @@ impl WebsocketClient {
         requests: &Arc<RwLock<RequestsMap>>,
         message: Message,
     ) -> Result<(), Error> {
-        // FIXME: This will also accept pings
-        let data = message.into_text()?;
+        let data = match message {
+            Message::Text(s) => s.to_string(),
+            Message::Binary(v) => String::from_utf8(v.to_vec()).map_err(|e| {
+                tokio_tungstenite::tungstenite::Error::Utf8(e.utf8_error().to_string())
+            })?,
+            Message::Ping(_) | Message::Pong(_) => return Ok(()),
+            Message::Close(_) => return Ok(()),
+            _ => return Ok(()),
+        };
 
         log::trace!("Received message: {:?}", data);
 
