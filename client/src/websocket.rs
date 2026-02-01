@@ -223,7 +223,7 @@ impl Client for WebsocketClient {
         let request = Request::build(method.to_owned(), params, Some(&request_id))
             .expect("Failed to serialize JSON-RPC request.");
 
-        log::debug!("Sending request: {}", serde_json::to_string(&request).unwrap());
+        log::debug!("Sending request: {}", serde_json::to_string(&request)?);
 
         let (tx, rx) = oneshot::channel();
 
